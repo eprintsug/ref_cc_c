@@ -134,6 +134,9 @@ while( my @row = $sth->fetchrow_array )
 		my $xpc = XML::LibXML::XPathContext->new( $doc );
 		$xpc->registerNs( "ep" => "http://eprints.org/ep2/data/2.0" );
 
+        #Check that item is live at this point in history
+		return unless($xpc->find('ep:status')->to_literal eq "archive");
+
 		# Check documents to see if there is *any* document that meets the FOA criteria
 		for my $item ( $xpc->findnodes('//ep:document') ) {
 			my $i_xpc = XML::LibXML::XPathContext->new( $item ); #boring!
