@@ -135,7 +135,7 @@ while( my @row = $sth->fetchrow_array )
 		$xpc->registerNs( "ep" => "http://eprints.org/ep2/data/2.0" );
 
         #Check that item is live at this point in history
-		return unless($xpc->find('ep:status')->to_literal eq "archive");
+		return unless($xpc->find('//ep:eprint_status')->to_literal eq "archive");
 
 		# Check documents to see if there is *any* document that meets the FOA criteria
 		for my $item ( $xpc->findnodes('//ep:document') ) {
