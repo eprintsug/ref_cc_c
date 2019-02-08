@@ -179,7 +179,6 @@ sub check_compliance {
 
 			#This timestamp will be the date that the embargo was lifted
 			my $timestamp = Time::Piece->strptime( $history->value("timestamp"), "%Y-%m-%d %H:%M:%S");
-
 		
 			my $pub_date = get_pub_date($eprint);
 
@@ -205,22 +204,30 @@ sub check_compliance {
 
 				my $content = $i_xpc->find('ep:content')->to_literal;
 				my $security = $i_xpc->find('ep:security')->to_literal;
+
+       			next unless $content;
+        		next unless $content eq "accepted" || $content eq "published";
+        		next if $type eq "foa" && $security ne "public";
+				#just to report the filename
 				my $doc_main = $i_xpc->find('ep:main')->to_literal;
+				#emb_len calc...
+				#FIXME assumes that date_embargo will be set at FCD or FOA or at embargo_lift.
+                # IT will almmost certainly not be set for the second two and it may be set at FCD,
+                # but it may also be set later on (eg when the item is in review)
+                my $emb_len;
+				if($i_xpc->find('ep:date_embargo')){ 
+					my $date_embargo = Time::Piece->strptime($i_xpc->find('ep:date_embargo')->to_literal, "%Y-%m-%d");
+					my $len = $date_embargo-$pub_date;
+					$emb_len = sprintf "%.0f", $len->months;
+					print "embargo detected => ".$pub_date->strftime("%Y-%m-%d")." to ".$date_embargo->strftime("%Y-%m-%d")." ($emb_len)\n";
+				}
 
-       				next unless $content;
-        			next unless $content eq "accepted" || $content eq "published";
-        			next if $type eq "foa" && $security ne "public";
-
-				#FIXME This will only be right if we arrived here via a lif_embargo event!!!
-				my $len = $timestamp-$pub_date;
 				my $new_date_value = $timestamp->strftime("%Y-%m-%d");
-				my $emb_len = sprintf "%.0f", $len->months;
 				print "hoa_date_$type => $new_date_value\n";
 
 				if(defined $update){
 					$eprint->set_value("hoa_date_".$type,$new_date_value);
-                    #TODO in view of above #FIXME work ou whether we have enough data here to set the hoa_emb_len
-					#$eprint->set_value("hoa_emb_len",$emb_len);
+					$eprint->set_value("hoa_emb_len",$emb_len) if (defined $emb_len);
 					$eprint->commit;
 				}
 				#flag that we have compliance values for this eprint && stop loop,
