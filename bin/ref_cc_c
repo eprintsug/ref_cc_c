@@ -164,7 +164,7 @@ sub check_compliance {
 	#keep per eprint flag for compliance
 	my $hoa_comp = {};
 
-	#Loop through the histor events returned by the SQL
+	#Loop through the history events returned by the SQL
 	while( my @row = $sth->fetchrow_array )
 	{
 	   my $historyid = $historyid_field->value_from_sql_row( $repo, \@row );
@@ -175,11 +175,18 @@ sub check_compliance {
 	  next if !defined $eprint;
 
  	  my $eprint_type = $eprint->value("type");
+	  #################
+	  # Elements (RT1) could check the symplectic_pids table to rule out those items that elements does not care about
+	  #################
 	  next unless( defined $eprint_type && grep( /^$eprint_type$/, @{$repo->config( "hefce_oa", "item_types" )} ) );
 
+	  #################
+	  # This should be flagged for further investigation, but for now continue to skip
+	  ##################
 	  next if($eprint->is_set("succeeds")); #this is a new version of an item... dates may hav carried
-	  # We have an FOA/FCD calculated for this iitem no need to process further
-	   next if $hoa_comp->{$eprintid};
+	  
+	  # We have an FOA/FCD calculated for this item no need to process further
+	  next if $hoa_comp->{$eprintid};
 
 	   #Get the history object
 	   $repo->dataset("history")->list([$historyid])->map ( sub {
@@ -202,12 +209,19 @@ sub check_compliance {
 
 			#This timestamp will be the date that the embargo was lifted
 			my $timestamp = Time::Piece->strptime( $history->value("timestamp"), "%Y-%m-%d %H:%M:%S");
+			
+			# Elements may not need to check and return depending on pub_date
+
+			# This is used to calc emb_len and is not a showstopper if not present
 			my $pub_date = get_pub_date($eprint);
-			return if !defined $pub_date;
+#			return if !defined $pub_date;
+			
 			#We'll need to look in that revision file to assess the state of play when the embargo was lifted
 			my $doc = XML::LibXML->load_xml(location => $rev_file);
 			my $xpc = XML::LibXML::XPathContext->new( $doc );
 			$xpc->registerNs( "ep" => "http://eprints.org/ep2/data/2.0" );
+			
+			#XPaths shoull be defined in a single place for clarity 
 			my $eprint_status = $xpc->find('//ep:eprint_status')->to_literal;
 			#Double check that eprint_status at this point in history 
 			#(may be a lift_embargo event on somethign that never left the review
@@ -231,9 +245,12 @@ sub check_compliance {
                			 #just to report the filename
 				my $doc_main = $i_xpc->find('ep:main')->to_literal;
 				
+				#################################
+				# Elements doesn't need to worry about calculating emb_len
+				################################
                 		#emb_len calc...
 				my $emb_len;
-				if($i_xpc->find('ep:date_embargo')){ 
+				if($i_xpc->find('ep:date_embargo') && defined $pub_date){ 
 					#FIXME assumes that date_embargo will be set at deposit or maybe oa!!
                 			#TODO perhaps we should be looping through *all* actions
 					my $date_embargo = get_embargo_date($i_xpc->find('ep:date_embargo')->to_literal);
@@ -263,14 +280,17 @@ sub check_compliance {
 					}
 				}
 
-		                #Get existing value to report on
+				#Get existing value to report on
 				my $old_date_value = '';
-				if($eprint->is_set("hoa_date_$type")){
+				if($eprint->exists_and_set("hoa_date_$type")){
 					$old_date_value = $eprint->value("hoa_date_$type");
 				}
                 
 				print CSV_OUTPUT "$eprintid,hoa_date_$type,$new_date_value,$old_date_value,";
-			        print CSV_OUTPUT "$emb_len" if EPrints::Utils::is_set($emb_len);
+			        ###########################
+				#Elements don't need emb_len
+				###########################
+				print CSV_OUTPUT "$emb_len" if EPrints::Utils::is_set($emb_len);
 				print CSV_OUTPUT "\n";
 				$CSV_COUNT++;
 				
