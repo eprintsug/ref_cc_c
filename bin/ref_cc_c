@@ -8,6 +8,7 @@ use warnings;
 use Text::CSV;
 use Getopt::Long;
 use Pod::Usage;
+use Data::Dumper;
 
 use EPrints;
 my $eprintid;
@@ -75,17 +76,35 @@ if(defined $output_file) {
    *CSV_OUTPUT = *STDOUT;
 }
 
-print CSV_OUTPUT "eprintid,hoa_date_type,new_date_value,old_date_value,emb_len\n";
+#keep per eprint flag for compliance
+my $hoa_comp = {};
 
-&check_fcds;
+my $max_id = &get_max_id;
+&check_all;
 
-&check_foas;
-
-&check_embargo_lifts;
+print CSV_OUTPUT "eprintid,fcd,old_fcd,foa,old_foa,emb_len\n";
+while(my($eprintid,$data) = each(%$hoa_comp)){
+	next if (!defined $data->{fcd} && !defined $data->{old_fcd} && !defined $data->{foa} && !defined $data->{old_foa});
+	print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{emb_len}."\n";
+	$CSV_COUNT++;
+}
+#print STDERR Dumper($hoa_comp)."\n";
 
 print "REPORTED $CSV_COUNT values\n";
 print "UPDATED $UPDATE_COUNT values\n" if $update;
 
+sub get_max_id {
+
+	my $sql = "select counter from counters where countername = 'eprintid'";
+
+	my $sth = $repo->get_database->prepare_select( $sql );
+	$repo->get_database->execute( $sth , $sql );
+	my $found = $sth->rows();
+
+	my $max_id = $sth->fetchrow_array;
+
+	return $max_id;
+}
 #not used yet
 sub check_all {
 
@@ -94,11 +113,10 @@ sub check_all {
 	# Elements: Checks all history events related to dataset eprints 
 	my $sql = "select historyid,objectid from history where datasetid = 'eprint'";
 
-	$sql.=" and objectid = $eprintid " if(defined $eprintid);
+	$sql.=" and objectid in ($eprintid) " if(defined $eprintid);
 	#order by timestamp to make sure we assess each lift embargo event in cronologically
 	$sql.=" order by objectid, timestamp_year, timestamp_month, timestamp_day, timestamp_hour, timestamp_minute, timestamp_second";
 
-	my @rows;
 	my $sth = $repo->get_database->prepare_select( $sql );
 	$repo->get_database->execute( $sth , $sql );
 	my $found = $sth->rows();
@@ -108,115 +126,57 @@ sub check_all {
 	#TODO check the compliance using revision data at this event.
 	# if compliant then teimstamp == hoa_date_fcd
 	# if not compliant future modification events should be checked to see if it becomes compliant
-	check_compliance($sth,"fcd");
-
-}
-
-
-sub check_fcds {
-
-	#Get all events where something was moved out of inbox and not into deletion
-	#ie the hefce_oa definition of deposit
-	my $sql = "select historyid,objectid from history where datasetid = 'eprint' and action like 'move_inbox_to_%' and action != 'move_inbox_to_deletion'";
-	$sql.=" and objectid = $eprintid " if(defined $eprintid);
-	#order by timestamp to make sure we assess each lift embargo event in cronologically
-	$sql.=" order by objectid, timestamp_year, timestamp_month, timestamp_day, timestamp_hour, timestamp_minute, timestamp_second";
-
-	my @rows;
-	my $sth = $repo->get_database->prepare_select( $sql );
-	$repo->get_database->execute( $sth , $sql );
-	my $found = $sth->rows();
-
-	$repo->log("$found deposit events found...") if($verbose);
-
-	#TODO check the compliance using revision data at this event.
-	# if compliant then teimstamp == hoa_date_fcd
-	# if not compliant future modification events should be checked to see if it becomes compliant
-	check_compliance($sth,"fcd");
-
-}
-
-sub check_foas{
-
-	#Get all events where something was moved in to the archive but not from deletion
-	#ie the hefce_oa definition of an *eprint* being OA
-	my $sql = "select historyid,objectid from history where datasetid = 'eprint' and action like 'move_%_to_archive' and action != 'move_deletion_to_archive'";
-	$sql.=" and objectid = $eprintid " if(defined $eprintid);
-	#order by timestamp to make sure we assess each lift embargo event in cronologically
-	$sql.=" order by objectid, timestamp_year, timestamp_month, timestamp_day, timestamp_hour, timestamp_minute, timestamp_second";
-
-	my @rows;
-	my $sth = $repo->get_database->prepare_select( $sql );
-	$repo->get_database->execute( $sth , $sql );
-	my $found = $sth->rows();
-
-	$repo->log("$found OA events found...") if($verbose);
-
-	#TODO check the compliance using revision data at this event.
-	# if compliant then teimstamp == hoa_date_foa
-	# if not compliant and embargo is present check lift_embargos events to confirm foa
-	# or future modification events should be checked to see if it becomes compliant
-	check_compliance($sth,"foa");
-
-}
-
-sub check_embargo_lifts{
-
-	#Get all the embargo lift events
-	my $sql = "select historyid,objectid from history where datasetid = 'eprint' and actor like '%lift_embargos'";
-	$sql.=" and objectid = $eprintid " if(defined $eprintid);
-	#order by timestamp to make sure we assess each lift embargo event in cronologically
-	$sql.=" order by objectid, timestamp_year, timestamp_month, timestamp_day, timestamp_hour, timestamp_minute, timestamp_second";
-
-	my @rows;
-	my $sth = $repo->get_database->prepare_select( $sql );
-	$repo->get_database->execute( $sth , $sql );
-	my $found = $sth->rows();
-
-	$repo->log("$found lift_embargo events found...") if($verbose);
-
-	#TODO check the compliance using revision data at this event.
-	# if compliant then teimstamp == hoa_date_fcd
-	# if not compliant future modification events should be checked to see if it becomes compliant
-	check_compliance($sth,"foa");
+	check_compliance($sth);
+	
 }
 
 sub check_compliance {
 
-	my ($sth,$type) = @_;
+	my ($sth) = @_;
 
 	my $objectid_field = $repo->dataset("history")->get_field( "objectid" );
 	my $historyid_field = $repo->dataset("history")->get_field( "historyid" );
 
-	#keep per eprint flag for compliance
-	my $hoa_comp = {};
-
+    	my $current_eprintid = 0;
+   	my $current_eprint = undef;
 	#Loop through the histor events returned by the SQL
+	
+	my $eprint;
 	while( my @row = $sth->fetchrow_array )
 	{
-	   my $historyid = $historyid_field->value_from_sql_row( $repo, \@row );
-	   my $eprintid = $objectid_field->value_from_sql_row( $repo, \@row );
 
-	  #We'll want the eprint object in question to get some key dates from that
-	  my ($eprint) = $repo->get_dataset("eprint")->list([$eprintid])->get_records( 0, 1 );	
-	  next if !defined $eprint;
+	    my $historyid = $historyid_field->value_from_sql_row( $repo, \@row );
+	    my $eprintid = $objectid_field->value_from_sql_row( $repo, \@row );
+            next if $hoa_comp->{$eprintid}->{ignore};
 
- 	  my $eprint_type = $eprint->value("type");
-	  next unless( defined $eprint_type && grep( /^$eprint_type$/, @{$repo->config( "hefce_oa", "item_types" )} ) );
+	    if($eprintid != $current_eprintid){
+		print STDERR "\reprintid: ".$eprintid."/$max_id";
+	        ($eprint) = $repo->get_dataset("eprint")->list([$eprintid])->get_records( 0, 1 );
+	    }
+#	    #We'll want the eprint object in question to get some key dates from that
+#	    $hoa_comp->{$eprintid}->{ignore} = 1 if !defined $eprint;
+	    next if !defined $eprint;
+	    $hoa_comp->{$eprintid}->{eprint} = $eprint;
 
-	  next if($eprint->is_set("succeeds")); #this is a new version of an item... dates may hav carried
-	  # We have an FOA/FCD calculated for this iitem no need to process further
-	   next if $hoa_comp->{$eprintid};
+	    my $eprint_type = $eprint->value("type");
+	    
+	    #this is a new version of an item... dates may hav carried
+	    $hoa_comp->{$eprintid}->{ignore} = 1 if($eprint->is_set("succeeds")); 
+            # We have an FOA AND FCD calculated for this iitem no need to process further
+	    $hoa_comp->{$eprintid}->{ignore} = 1 unless( defined $eprint_type && grep( /^$eprint_type$/, @{$repo->config( "hefce_oa", "item_types" )} ) );
 
-	   #Get the history object
-	   $repo->dataset("history")->list([$historyid])->map ( sub {
-		my( undef, undef, $history ) = @_;
+            next if $hoa_comp->{$eprintid}->{fcd} && $hoa_comp->{$eprintid}->{foa};
+	    $current_eprintid = $eprintid;
 
+	    $hoa_comp->{$eprintid}->{old_fcd} = $eprint->value("hoa_date_fcd");
+	    $hoa_comp->{$eprintid}->{old_foa} = $eprint->value("hoa_date_foa");
+	    #Get the history object
+	    $repo->dataset("history")->list([$historyid])->map ( sub {
+		    my( undef, undef, $history ) = @_;
 			# We have an FOA/FCD calculated for this iitem no need to process further
-			return if $hoa_comp->{$eprintid};
+			return if ! defined $history;
 
 			my $rev_file = get_rev_file($history);
-
 			$repo->log($eprintid." ".$eprint->value("type")) if $verbose;
 			$repo->log("Action: ".$history->value("action")) if $verbose;
 			$repo->log("Timestamp: ".$history->value("timestamp")) if $verbose;
@@ -232,16 +192,16 @@ sub check_compliance {
 			my $pub_date = get_pub_date($eprint);
 #			return if !defined $pub_date;
 			#We'll need to look in that revision file to assess the state of play when the embargo was lifted
-			my $doc = XML::LibXML->load_xml(location => $rev_file);
+#			my $doc = XML::LibXML->load_xml(location => $rev_file);
+			my $doc = failsafe_libxml_parse_file($rev_file);
+			return unless(defined $doc);
+		
 			my $xpc = XML::LibXML::XPathContext->new( $doc );
 			$xpc->registerNs( "ep" => "http://eprints.org/ep2/data/2.0" );
 			my $eprint_status = $xpc->find('//ep:eprint_status')->to_literal;
-			#Double check that eprint_status at this point in history 
-			#(may be a lift_embargo event on somethign that never left the review
-			#If type == foa check that eprint is in archive
-			return if($type eq "foa" && $eprint_status ne "archive");
-			#If type == fcd cehck that eprint is in archive or buffer
-			return if($type eq "fcd" && $eprint_status ne "archive" && $eprint_status ne "buffer");
+
+	                #cehck that eprint is in archive or buffer
+			return if($eprint_status ne "archive" && $eprint_status ne "buffer");
 			#Check that there is any document present at all
 			return unless( $xpc->findnodes('//ep:document') );
 	
@@ -252,78 +212,66 @@ sub check_compliance {
 				my $content = $i_xpc->find('ep:content')->to_literal;
 				my $security = $i_xpc->find('ep:security')->to_literal;
        	       			next unless $content;
-        			next unless $content eq "accepted" || $content eq "published";
-        			next if $type eq "foa" && $security ne "public";
-				
-               			 #just to report the filename
-				my $doc_main = $i_xpc->find('ep:main')->to_literal;
-				
-                		#emb_len calc...
-				my $emb_len;
-				if($i_xpc->find('ep:date_embargo') && EPrints::Utils::is_set($pub_date)){ 
-					#FIXME assumes that date_embargo will be set at deposit or maybe oa!!
-           			#TODO perhaps we should be looping through *all* actions
-					my $date_embargo = get_embargo_date($i_xpc->find('ep:date_embargo')->to_literal);
-	
-					my $len = $date_embargo-$pub_date;
-					$emb_len = sprintf "%.0f", $len->months;
-
-					$repo->log("Embargo detected (associated action: $type): ".$pub_date->strftime("%Y-%m-%d")." to ".$date_embargo->strftime("%Y-%m-%d")." ($emb_len)") if $verbose;
-				}
+        			next unless $content eq "accepted" || $content eq "published" || $content eq "published_online";
 
 				my $new_date_value = $timestamp->strftime("%Y-%m-%d");
 
-				#Double check and amend if FCD is after the new FOA this can happen if 
-				#compliance is achieved between deposit and publication 
-				#(ie we miss the FCD cos we've only checked the status_change events)
-				#FIXME this remedial work will only happen if the FOA < FCD is apparent at the point of FOA
-				#TODO perhaps we should be looping through *all* actions
-				if($type eq "foa"){
-					my $FCD_date_value = Time::Piece->strptime( $eprint->value("hoa_date_fcd") , "%Y-%m-%d" );
-
-					if($FCD_date_value > $timestamp){
-						print CSV_OUTPUT "$eprintid,FCD after FOA,$new_date_value,$timestamp\n";
-                         			if(defined $update){
-    							$eprint->set_value("hoa_date_fcd",$new_date_value);
-	    						$eprint->commit;
-                        			}
-					}
+				if(!defined $hoa_comp->{$eprintid}->{fcd}){
+		               		$hoa_comp->{$eprintid}->{fcd} = $new_date_value;
 				}
-
-		                #Get existing value to report on
-				my $old_date_value = '';
-				if($eprint->is_set("hoa_date_$type")){
-					$old_date_value = $eprint->value("hoa_date_$type");
+                		if(!defined $hoa_comp->{$eprintid}->{foa} && $security eq "public" && $eprint_status eq "archive" ){
+					$hoa_comp->{$eprintid}->{foa} = $new_date_value;
 				}
-                
-				print CSV_OUTPUT "$eprintid,hoa_date_$type,$new_date_value,$old_date_value,";
-			        print CSV_OUTPUT "$emb_len" if EPrints::Utils::is_set($emb_len);
-				print CSV_OUTPUT "\n";
-				$CSV_COUNT++;
-				
-                		if(defined $update){
-					$eprint->set_value("hoa_date_".$type,$new_date_value);
-					$eprint->set_value("hoa_emb_len",$emb_len) if EPrints::Utils::is_set($emb_len);
-					$eprint->commit;
-                    			$UPDATE_COUNT++;
-				}
-				#flag that we have compliance values for this eprint && stop loop,
-				$hoa_comp->{$eprintid}=1;
-				last;
-			}		
-	   });
-	}
+				$hoa_comp->{$eprintid}->{emb_len} = '';
+				if($i_xpc->find('ep:date_embargo') && EPrints::Utils::is_set($pub_date)){ 
+					my $date_embargo = get_embargo_date($i_xpc->find('ep:date_embargo')->to_literal);
+	
+					my $len = $date_embargo-$pub_date;
+					my $emb_len = sprintf "%.0f", $len->months;
 
+					$repo->log("Embargo detected ".$pub_date->strftime("%Y-%m-%d")." to ".$date_embargo->strftime("%Y-%m-%d")." ($emb_len)") if $verbose;
+		                        $hoa_comp->{$eprintid}->{emb_len} = $emb_len; #allow this one to be reset if date_embargo changes??
+				}
+			} #doc loop	
+	   	}); #history object map
+	} #sql result loop
+
+}
+
+sub failsafe_libxml_parse_file{
+
+        my ($xml_file) = @_;
+
+#        my $xml;
+#        eval { $xml = $libxml->parse_file($xml_file); };
+#        if($@){
+#                $repo->log( "Could not fetch or process the file $xml_file" );
+#                return undef;
+#        }
+#        return $xml;
+	my $doc;
+        eval { $doc = XML::LibXML->load_xml(location => $xml_file); };
+        if($@){
+                $repo->log( "\nCould not fetch or process the file $xml_file" );
+                return undef;
+        }
+	return $doc;
 }
 
 sub get_rev_file {
 	my($history) = @_;
 
+	return if ! defined $history;
+
 	#Get the revision data associated with the lift_embargo event
 	my $rev_obj = $history->get_stored_file( "dataobj.xml" );
 	if(!defined $rev_obj){
-		#mpved_to events do not have revision files but they do have modify events with the same revision
-		return get_rev_file(get_modify($history));
+		if($history->value("action") ne "modify"){
+			#mpved_to events do not have revision files but they do have modify events with the same revision
+			return get_rev_file(get_modify($history));
+		}else{
+			return undef;
+		}
 	}
 	return $rev_obj->get_local_copy;
 }
