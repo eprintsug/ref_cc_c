@@ -86,6 +86,33 @@ print CSV_OUTPUT "eprintid,hoa_date_type,new_date_value,old_date_value,emb_len\n
 print "REPORTED $CSV_COUNT values\n";
 print "UPDATED $UPDATE_COUNT values\n" if $update;
 
+#not used yet
+sub check_all {
+
+	#Get all events where something was moved out of inbox and not into deletion
+	#ie the hefce_oa definition of deposit
+	# Elements: Checks all history events related to dataset eprints 
+	my $sql = "select historyid,objectid from history where datasetid = 'eprint'";
+
+	$sql.=" and objectid = $eprintid " if(defined $eprintid);
+	#order by timestamp to make sure we assess each lift embargo event in cronologically
+	$sql.=" order by objectid, timestamp_year, timestamp_month, timestamp_day, timestamp_hour, timestamp_minute, timestamp_second";
+
+	my @rows;
+	my $sth = $repo->get_database->prepare_select( $sql );
+	$repo->get_database->execute( $sth , $sql );
+	my $found = $sth->rows();
+
+	$repo->log("$found deposit events found...") if($verbose);
+
+	#TODO check the compliance using revision data at this event.
+	# if compliant then teimstamp == hoa_date_fcd
+	# if not compliant future modification events should be checked to see if it becomes compliant
+	check_compliance($sth,"fcd");
+
+}
+
+
 sub check_fcds {
 
 	#Get all events where something was moved out of inbox and not into deletion
@@ -203,7 +230,7 @@ sub check_compliance {
 			#This timestamp will be the date that the embargo was lifted
 			my $timestamp = Time::Piece->strptime( $history->value("timestamp"), "%Y-%m-%d %H:%M:%S");
 			my $pub_date = get_pub_date($eprint);
-			return if !defined $pub_date;
+#			return if !defined $pub_date;
 			#We'll need to look in that revision file to assess the state of play when the embargo was lifted
 			my $doc = XML::LibXML->load_xml(location => $rev_file);
 			my $xpc = XML::LibXML::XPathContext->new( $doc );
@@ -233,9 +260,9 @@ sub check_compliance {
 				
                 		#emb_len calc...
 				my $emb_len;
-				if($i_xpc->find('ep:date_embargo')){ 
+				if($i_xpc->find('ep:date_embargo') && EPrints::Utils::is_set($pub_date)){ 
 					#FIXME assumes that date_embargo will be set at deposit or maybe oa!!
-                			#TODO perhaps we should be looping through *all* actions
+           			#TODO perhaps we should be looping through *all* actions
 					my $date_embargo = get_embargo_date($i_xpc->find('ep:date_embargo')->to_literal);
 	
 					my $len = $date_embargo-$pub_date;
