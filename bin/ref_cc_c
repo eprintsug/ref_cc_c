@@ -108,7 +108,7 @@ while(my($eprintid,$data) = each(%$hoa_comp)){
 		}
 		if(defined $eprint){
 			$eprint->commit;
-			print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{old_emb_len}.",".$data->{emb_len}) if $verbose;
+			print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{old_emb_len}.",".$data->{emb_len}."\n";
 			$CSV_COUNT++;
 			$UPDATE_COUNT++;
 		}
