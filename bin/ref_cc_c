@@ -108,15 +108,19 @@ while(my($eprintid,$data) = each(%$hoa_comp)){
 		}
 		if(defined $eprint){
 			$eprint->commit;
-			print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{old_emb_len}.",".$data->{emb_len}."\n";
-			$CSV_COUNT++;
 			$UPDATE_COUNT++;
 		}
-
-	}else{
-		print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{old_emb_len}.",".$data->{emb_len}."\n";
-		$CSV_COUNT++;
 	}
+
+	my $fcd = $data->{fcd} || "";
+	my $old_fcd = $data->{old_fcd} || "";
+	my $foa = $data->{foa} || "";
+	my $old_foa =$data->{old_foa} || "";
+	my $old_emb_len = $data->{old_emb_len} || "";
+	my $emb_len = $data->{emb_len} || "";
+	print CSV_OUTPUT "$eprintid,".$fcd.",".$old_fcd.",".$foa.",".$old_foa.",".$old_emb_len.",".$emb_len."\n";
+
+	$CSV_COUNT++;
 
 }
 #print STDERR Dumper($hoa_comp)."\n";
