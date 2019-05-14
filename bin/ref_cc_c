@@ -82,15 +82,46 @@ my $hoa_comp = {};
 my $max_id = &get_max_id;
 &check_all;
 
-print CSV_OUTPUT "eprintid,fcd,old_fcd,foa,old_foa,emb_len\n";
+print CSV_OUTPUT "\n" if(!defined $output_file);
+
+print CSV_OUTPUT "eprintid,fcd,old_fcd,foa,old_foa,old_emb_len,emb_len\n";
+print STDERR "\n";
 while(my($eprintid,$data) = each(%$hoa_comp)){
 	next if (!defined $data->{fcd} && !defined $data->{old_fcd} && !defined $data->{foa} && !defined $data->{old_foa});
-	print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{emb_len}."\n";
-	$CSV_COUNT++;
+
+	if(defined $update){
+		my $eprint = undef;
+		if(defined $data->{fcd} && $data->{fcd} ne $data->{old_fcd}){
+			$eprint = $repo->dataset( "eprint" )->dataobj( $eprintid );
+			$repo->log("Changing FCD from ".$data->{old_fcd}." to ".$data->{fcd}) if $verbose;
+			$eprint->set_value("hoa_date_fcd", $data->{fcd});
+		}
+		if(defined $data->{foa} && $data->{foa} ne $data->{old_foa}){
+			$eprint = $repo->dataset( "eprint" )->dataobj( $eprintid ) if(!defined $eprint);
+			$repo->log("Changing FOA from ".$data->{old_foa}." to ".$data->{foa}) if $verbose;
+			$eprint->set_value("hoa_date_foa", $data->{foa});
+		}
+		if(defined $data->{emb_len} && defined $data->{old_emb_len} && $data->{emb_len} ne $data->{old_emb_len}){
+			$eprint = $repo->dataset( "eprint" )->dataobj( $eprintid ) if(!defined $eprint);
+			$repo->log("Changing EMB_LEN from ".$data->{old_emb_len}." to ".$data->{emb_len}) if $verbose;
+			$eprint->set_value("hoa_emb_len", $data->{emb_len});
+		}
+		if(defined $eprint){
+			$eprint->commit;
+			print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{old_emb_len}.",".$data->{emb_len}) if $verbose;
+			$CSV_COUNT++;
+			$UPDATE_COUNT++;
+		}
+
+	}else{
+		print CSV_OUTPUT "$eprintid,".$data->{fcd}.",".$data->{old_fcd}.",".$data->{foa}.",".$data->{old_foa}.",".$data->{old_emb_len}.",".$data->{emb_len}."\n";
+		$CSV_COUNT++;
+	}
+
 }
 #print STDERR Dumper($hoa_comp)."\n";
 
-print "REPORTED $CSV_COUNT values\n";
+print "\nREPORTED $CSV_COUNT values\n";
 print "UPDATED $UPDATE_COUNT values\n" if $update;
 
 sub get_max_id {
@@ -165,11 +196,14 @@ sub check_compliance {
             # We have an FOA AND FCD calculated for this iitem no need to process further
 	    $hoa_comp->{$eprintid}->{ignore} = 1 unless( defined $eprint_type && grep( /^$eprint_type$/, @{$repo->config( "hefce_oa", "item_types" )} ) );
 
+            next if $hoa_comp->{$eprintid}->{ignore};
+
             next if $hoa_comp->{$eprintid}->{fcd} && $hoa_comp->{$eprintid}->{foa};
 	    $current_eprintid = $eprintid;
 
 	    $hoa_comp->{$eprintid}->{old_fcd} = $eprint->value("hoa_date_fcd");
 	    $hoa_comp->{$eprintid}->{old_foa} = $eprint->value("hoa_date_foa");
+	    $hoa_comp->{$eprintid}->{old_emb_len} = $eprint->value("hoa_emb_len");
 	    #Get the history object
 	    $repo->dataset("history")->list([$historyid])->map ( sub {
 		    my( undef, undef, $history ) = @_;
@@ -234,6 +268,10 @@ sub check_compliance {
 				}
 			} #doc loop	
 	   	}); #history object map
+		#unset the "old" values if there are no newvalues
+		$hoa_comp->{$eprintid}->{old_fcd} = undef if(!defined $hoa_comp->{$eprintid}->{fcd} || $hoa_comp->{$eprintid}->{fcd} eq "");
+		$hoa_comp->{$eprintid}->{old_foa} = undef if(!defined $hoa_comp->{$eprintid}->{foa} || $hoa_comp->{$eprintid}->{foa} eq "");
+		$hoa_comp->{$eprintid}->{old_emb_len} = undef if(!defined $hoa_comp->{$eprintid}->{emb_len} || $hoa_comp->{$eprintid}->{emb_len} eq "");
 	} #sql result loop
 
 }
