@@ -28,7 +28,8 @@ GetOptions(
 	'verbose+' => \$verbose,
 	'eprintid=s' => \$eprintid,
 	'update' => \$update,
-    	'output=s' => \$output_file,
+   	'output=s' => \$output_file,
+   	'elements' => \$elements,
 
 );
 
@@ -84,7 +85,9 @@ my $max_id = &get_max_id;
 
 print CSV_OUTPUT "\n" if(!defined $output_file);
 
-print CSV_OUTPUT "eprintid,fcd,old_fcd,foa,old_foa,old_emb_len,emb_len\n";
+print CSV_OUTPUT "eprintid,fcd,old_fcd,foa,old_foa,old_emb_len,emb_len";
+print CSV_OUTPUT ",pub_date,date_embargo" if defined $elements;
+print CSV_OUTPUT "\n";
 print STDERR "\n";
 while(my($eprintid,$data) = each(%$hoa_comp)){
 	next if (!defined $data->{fcd} && !defined $data->{old_fcd} && !defined $data->{foa} && !defined $data->{old_foa});
@@ -118,7 +121,12 @@ while(my($eprintid,$data) = each(%$hoa_comp)){
 	my $old_foa =$data->{old_foa} || "";
 	my $old_emb_len = $data->{old_emb_len} || "";
 	my $emb_len = $data->{emb_len} || "";
-	print CSV_OUTPUT "$eprintid,".$fcd.",".$old_fcd.",".$foa.",".$old_foa.",".$old_emb_len.",".$emb_len."\n";
+    my $pub_date = $data->{pub_date} || "";
+    my $date_embargo = $data->{date_embargo} || "";
+
+	print CSV_OUTPUT "$eprintid,$fcd,$old_fcd,$foa,$old_foa,$old_emb_len,$emb_len";
+    print CSV_OUTPUT ",$pub_date,$date_embargo" if defined $elements;
+    print CSV_OUTPUT."\n";
 
 	$CSV_COUNT++;
 
@@ -261,6 +269,8 @@ sub check_compliance {
 					$hoa_comp->{$eprintid}->{foa} = $new_date_value;
 				}
 				$hoa_comp->{$eprintid}->{emb_len} = '';
+				$hoa_comp->{$eprintid}->{date_embargo} = '' if(defined $elements);
+				$hoa_comp->{$eprintid}->{pub_date} = '' if(defined $elements);
 				if($i_xpc->find('ep:date_embargo') && EPrints::Utils::is_set($pub_date)){ 
 					my $date_embargo = get_embargo_date($i_xpc->find('ep:date_embargo')->to_literal);
 	
@@ -268,7 +278,9 @@ sub check_compliance {
 					my $emb_len = sprintf "%.0f", $len->months;
 
 					$repo->log("Embargo detected ".$pub_date->strftime("%Y-%m-%d")." to ".$date_embargo->strftime("%Y-%m-%d")." ($emb_len)") if $verbose;
-		                        $hoa_comp->{$eprintid}->{emb_len} = $emb_len; #allow this one to be reset if date_embargo changes??
+		            $hoa_comp->{$eprintid}->{emb_len} = $emb_len; #allow this one to be reset if date_embargo changes??
+		            $hoa_comp->{$eprintid}->{pub_date} = $pub_date->strftime("%Y-%m-%d") if(defined $elements);
+		            $hoa_comp->{$eprintid}->{date_embargo} = $date_embargo->strftime("%Y-%m-%d") if(defined $elements);
 				}
 			} #doc loop	
 	   	}); #history object map
