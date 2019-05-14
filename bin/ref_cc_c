@@ -12,19 +12,14 @@ use Data::Dumper;
 
 use EPrints;
 my $eprintid;
-my $nofilter;
-my $version = 0;
 my $verbose = 0;
-my $help = 0;
-my $man = 0;
 my $update;
 my $output_file;
+my $elements;
 
 Getopt::Long::Configure("permute");
 
 GetOptions( 
-	'help|?' => \$help,
-	'man' => \$man,
 	'verbose+' => \$verbose,
 	'eprintid=s' => \$eprintid,
 	'update' => \$update,
