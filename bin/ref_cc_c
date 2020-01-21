@@ -27,6 +27,7 @@ GetOptions(
    	'elements' => \$elements,
 
 );
+$ENV{TMPDIR} = '/var/tmp';
 
 # || pod2usage( 2 );
 #pod2usage( 1 ) if $help;
@@ -121,7 +122,7 @@ while(my($eprintid,$data) = each(%$hoa_comp)){
 
 	print CSV_OUTPUT "$eprintid,$fcd,$old_fcd,$foa,$old_foa,$old_emb_len,$emb_len";
     print CSV_OUTPUT ",$pub_date,$date_embargo" if defined $elements;
-    print CSV_OUTPUT."\n";
+    print CSV_OUTPUT "\n";
 
 	$CSV_COUNT++;
 
@@ -152,6 +153,10 @@ sub check_all {
 	my $sql = "select historyid,objectid from history where datasetid = 'eprint'";
 
 	$sql.=" and objectid in ($eprintid) " if(defined $eprintid);
+
+	#restrict to events after 2013
+	$sql.=" and timestamp_year >= 2014";
+
 	#order by timestamp to make sure we assess each lift embargo event in cronologically
 	$sql.=" order by objectid, timestamp_year, timestamp_month, timestamp_day, timestamp_hour, timestamp_minute, timestamp_second";
 
@@ -180,6 +185,8 @@ sub check_compliance {
 	#Loop through the histor events returned by the SQL
 	
 	my $eprint;
+	my $COUNT=0;
+	my $rows = $sth->rows;
 	while( my @row = $sth->fetchrow_array )
 	{
 
@@ -188,7 +195,9 @@ sub check_compliance {
             next if $hoa_comp->{$eprintid}->{ignore};
 
 	    if($eprintid != $current_eprintid){
-		print STDERR "\reprintid: ".$eprintid."/$max_id";
+		$COUNT++;
+#		print STDERR "\reprintid: ".$eprintid."/$max_id";
+		print STDERR "\rrecords: ".$COUNT."/$rows";
 	        ($eprint) = $repo->get_dataset("eprint")->list([$eprintid])->get_records( 0, 1 );
 	    }
 #	    #We'll want the eprint object in question to get some key dates from that
